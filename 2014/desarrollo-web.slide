@@ -1,0 +1,43 @@
+Desarrollo web desde un lenguaje de sistemas
+
+Toni Cárdenas
+Tyba
+http://tcardenas.me
+@tcardv
+
+* ¿Por qué ibas a montar una web con Go? 
+
+¿Qué tiene que no tenga Rails, Djang, Flask, PHP?
+
+Go es un *lenguaje*de*sistemas*, en un sentido amplio de «sistemas». Eso supone tener control de tu programa (¿casi?) a nivel de memoria.
+
+Vamos a ver qué significa esto para nosotros, desarrolladores web.
+
+* Cuando Go encuentra la web.
+
+El primer punto de colisión entre Go y la web: *net/http*.
+
+.play desarrollo-web/aiyaarda.go /START/,/END/
+
+* Cuando Go encuentra la web.
+
+Acabamos de montar una (muy sencilla) web.
+
+No hemos configurado un servidor, hemos *programado*un*servidor*, usando una librería.
+
+¿Para qué querríamos esto?
+
+Voy a tardar un poco más en dar alguna respuesta a esta pregunta. Antes quiero que hagamos algo.
+
+* Un paseo por net/http.
+
+* ListenAndServe
+
+    http.ListenAndServe(":9999", nil)
+
+ListenAndServe es nuestro /etc/init.d/nginx start
+
+    func ListenAndServe(addr string, handler Handler) error {
+		server := &Server{Addr: addr, Handler: handler}
+		return server.ListenAndServe()
+	}

@@ -19,6 +19,8 @@ El primer punto de colisión entre Go y la web: *net/http*.
 
 .play desarrollo-web/aiyaarda.go /START/,/END/
 
+[[http://localhost:9000]]
+
 * Cuando Go encuentra la web.
 
 Acabamos de montar una (muy sencilla) web.
@@ -31,13 +33,280 @@ Voy a tardar un poco más en dar alguna respuesta a esta pregunta. Antes quiero 
 
 * Un paseo por net/http.
 
-* ListenAndServe
+El código de net/http es sorprendentemente simple y claro.
 
     http.ListenAndServe(":9999", nil)
 
 ListenAndServe es nuestro /etc/init.d/nginx start
 
     func ListenAndServe(addr string, handler Handler) error {
-		server := &Server{Addr: addr, Handler: handler}
-		return server.ListenAndServe()
-	}
+    	server := &Server{Addr: addr, Handler: handler}
+    	return server.ListenAndServe()
+    }
+
+Crea un nuevo http.Server y lo pone a escuchar y servir. Sencillo, ¿no?
+
+Nota que tú puedes crear tu propio http.Server y combinarlo de todas las mil maneras que puede ofrecer el lenguaje de programación.
+
+* Un paseo por net/http (hacia abajo).
+
+    func (srv *Server) ListenAndServe() error {
+        addr := srv.Addr
+        if addr == "" {
+            addr = ":http"
+        }
+        ln, err := net.Listen("tcp", addr)
+        if err != nil {
+            return err
+        }
+        return srv.Serve(tcpKeepAliveListener{ln.(*net.TCPListener)})
+    }
+
+Casi literalmente «listen» y después «serve».
+
+net.Listen devuelve un net.Listener genérico (valor interfaz). Sabemos que es un net.TCPListener, así que hacemos una aserción de tipo. Sacrificamos algo de _type_safety_ a cambio de una API simple y clara.
+
+* Un paseo por net/http (hacia abajo).
+
+    func (srv *Server) Serve(l net.Listener) error {
+        defer l.Close()
+        for {
+            rw, e := l.Accept()
+            // Skipped error handling.
+            c, err := srv.newConn(rw)
+            if err != nil {
+                continue
+            }
+            go c.serve()
+        }
+    }
+
+En un bucle infinito, «aceptamos» conexiones, la envolvemos con srv.newConn, y la servimos en una nueva gorrutina.
+
+* Un paseo por net/http (hacia abajo).
+
+    func (c *conn) serve() {
+        // Skip boilerplate, TLS, etc.
+        for {
+            w, err := c.readRequest()
+            // Skip err and a few corner cases.
+
+            // HTTP cannot have multiple simultaneous active requests.[*]
+            // Until the server replies to this request, it can't read another,
+            // so we might as well run the handler in this goroutine.
+            // [*] Not strictly true: HTTP pipelining.  We could let them all process
+            // in parallel even if their responses need to be serialized.
+            serverHandler{c.server}.ServeHTTP(w, w.req)
+            if c.hijacked() {
+                return
+            }
+            w.finishRequest()
+            // Skip some more closing corner cases.
+        }
+    }
+
+* Un paseo por net/http (hacia abajo).
+
+    func (sh serverHandler) ServeHTTP(rw ResponseWriter, req *Request) {
+        handler := sh.srv.Handler
+        if handler == nil {
+            handler = DefaultServeMux
+        }
+        handler.ServeHTTP(rw, req)
+    }
+
+handler lo pasamos en nuestra llamada a ListenAndServe. Como pasamos nil, cogemos el DefaultServeMux.
+
+* De net/http al SO.
+
+Esto es básicamente lo que se llama en l.Accept, una vez desenvuelto.
+
+    func (fd *netFD) accept(toAddr func(syscall.Sockaddr) Addr) (netfd *netFD, err error) {
+        var s int
+        var rsa syscall.Sockaddr
+        fd.pd.PrepareRead()
+
+        s, rsa, err = accept(fd.sysfd)
+        // Skip error handling.
+
+        netfd, _ = newFD(s, fd.family, fd.sotype, fd.net)
+        lsa, _ := syscall.Getsockname(netfd.sysfd)
+        netfd.setAddr(toAddr(lsa), toAddr(rsa))
+        return netfd, nil
+    }
+
+* De net/http al SO.
+
+    func accept(fd int) (int, syscall.Sockaddr, error) {
+        nfd, sa, err = syscall.Accept(fd)
+        if err == nil {
+            syscall.CloseOnExec(nfd)
+        }
+        syscall.SetNonblock(nfd, true)
+        return nfd, sa, nil
+    }
+
+Llamadas al sistema. Aquí vamos a parar.
+
+* ¿Qué hemos visto?
+
+Hemos llegado, en unas pocas diapositivas, a las llamadas al sistema del servidor de Go ofrece al programador.
+
+Es simple, transparente, configurable y modular, gracias al enfoque de Go hacia la programación de sistemas.
+
+¿Es esto una _feature_ valiosa para el desarrollador web? ¿Para qué todo este paseo?
+
+Vamos ahora a hacer el viaje inverso.
+
+* Un paseo por net/http (hacia arriba).
+
+Cuando creamos un Server, le pasamos un Handler. Si le pasamos nil, su Handler será http.DefaultServeMux.
+
+Un Handler es cualquier cosa capaz de servir HTTP con un método ServeHTTP(response, request).
+
+* ServeMux
+
+ServeMux es un tipo de Handler que mapea URLs a otros handlers.
+
+    type ServeMux struct {
+        mu    sync.RWMutex
+        m     map[string]muxEntry
+        hosts bool // whether any patterns contain hostnames
+    }
+
+    func (mux *ServeMux) ServeHTTP(w ResponseWriter, r *Request) {
+        h, _ := mux.Handler(r)
+        h.ServeHTTP(w, r)
+    }
+
+    func (mux *ServeMux) handler(host, path string) (h Handler, pattern string) {
+        mux.mu.RLock()
+        defer mux.mu.RUnlock()
+        h, pattern = mux.match(path)
+        if h == nil {
+            h, pattern = NotFoundHandler(), ""
+        }
+        return
+    }
+
+* ServeMux
+
+    // Most-specific (longest) pattern wins
+    func (mux *ServeMux) match(path string) (h Handler, pattern string) {
+        var n = 0
+        for k, v := range mux.m {
+            if !pathMatch(k, path) {
+                continue
+            }
+            if h == nil || len(k) > n {
+                n = len(k)
+                h = v.h
+                pattern = v.pattern
+            }
+        }
+        return
+    }
+
+* ServeMux
+
+Y ¿cómo registramos nuevas rutas?
+
+    func (mux *ServeMux) HandleFunc(pattern string, handler func(ResponseWriter, *Request)) {
+        mux.Handle(pattern, HandlerFunc(handler))
+    }
+
+    func (mux *ServeMux) Handle(pattern string, handler Handler) {
+       // Básicamente, mete el patrón con su handler en el ServeMux,
+       // para luego despacharlo como se describe arriba.
+    }
+
+Así hemos comprendido, a nivel código, todo lo que hacía nuestra web de ejemplo.
+
+* Podríamos haber hecho directamente...
+
+.play desarrollo-web/aiyaarda2.go /START/,/END/
+
+[[http://localhost:9000]]
+
+Ahora no usamos ningún ServeMux; todas las requests del servidor irán a nuestro myHandler, que es una HandlerFunc.
+
+* Podríamos haber hecho también...
+
+.play desarrollo-web/aiyaarda-type.go /START/,/END/
+
+[[http://localhost:9000]]
+
+* Off-topic: thread safety!
+
+.play desarrollo-web/aiyaarda-typesafe.go /START/,/END/
+
+[[http://localhost:9000]]
+
+* Más cosas que ofrece net/http
+
+- Cliente web (net.Get, net.Post, cosas a más bajo nivel).
+- Handler prefabricado para ficheros estáticos.
+- Handlers redirectores.
+- Handlers con _timeout_.
+- Profiling con net/http/pprof.
+- Testing con net/http/httptest. 
+- (Fast)?CGI con net/http/f?cgi.
+- Proxy inverso.
+
+* Vale, pero ¿por qué esto me importa?
+
+En Go, todas las piezas de tu servidor/aplicación web están *al*alcance*de*tu*código*y*de*tu*cabeza*.
+
+Con un lenguaje de sistemas tienes capacidad para controlar exactamente qué ocurre en tu aplicación.
+
+En un lenguaje con un diseño simple y predecible esto se hace mucho más obvio.
+
+Con este paseo a trevés de la
+
+* Nuevas formas de crear webs.
+
+En 2004, una arquitectura MVC-ish para el servidor tenía mucho sentido.
+
+.image desarrollo-web/pasado.png
+
+* Nuevas formas de crear webs
+
+En 2014, exigimos más a las webapps y tenemos clientes más potentes.
+
+.image desarrollo-web/futuro.png
+
+* Nuevas formas de crear webs.
+
+En el lado del servidor ya no programamos aplicaciones completas, *programamos*librerías* para que otros programas los utilicen.
+
+Muchas de las _features_ que nos ofrecen los frameworks como Rails o Django ya no nos son tan útiles,
+cuando lo único que tenemos que hacer de cara al cliente es parsear y escupir JSON.
+
+Tiene sentido mantener el servidor ligero, rápido y fácilmente hackeable.
+
+* Otras utilidades para la web.
+
+- template/html es un potente motor de plantillas.
+- encoding/json, encoding/xml codifican y decodifican estructuras de datos de Go.
+- database/sql define una interfaz común para tratar con bases de datos SQL. Los motores de bases de datos específicas (de terceras partes) la implementan.
+- testing y `go test` son un framework simple para hacer tests.
+
+Aunque Go llega en una época en la que el backend adelgaza, viene con pilas incluidas en la librería estándar. 
+
+* Un ejemplo: lista de tareas colaborativa.
+
+.play desarrollo-web/todo-list.go /select {/,/\t}/
+
+[[http://localhost:9000]]
+
+* En conclusión
+
+Go *no*revoluciona*el*desarrollo*web*.
+
+No hay frameworks tan completos como puedan ser Django o Rails.
+
+Pero lo que hace, lo hace realmente bien, y ofrece a los desarrolladores web un control al que no está acostumbrado.
+
+Las primitivas de (gorrutinas y canales) lo hacen especialmente bueno para webapps potentes; lanzar tareas colaborativas y/o en segundo plano es trivial y transparente. Nada de callbacks ni servicios externos.
+
+Si te gusta Go, haz webs con él.

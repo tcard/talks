@@ -1,0 +1,349 @@
+1.
+
+En esta charla vamos a explorar las posibilidades de Go como lenguaje funcional.
+
+Antes de empezar: a mí me gusta que nos tomemos las charlas como algo más participativo, donde lo importante es que todos aprendamos lo mejor posible. Por eso yo prefiero que me interrumpáis en algún momento con correcciones, dudas, sugerencias o lo que sea, que estar aquí diciendo lo mío para al final aceptar preguntas y listo. Esta charla está estructurada con esto en mente.
+
+2.
+
+Voy a empezar con una breve definición de programación funcional. Es un término que todos hemos oído pero algo sobrecargado a estas alturas; es importante que todos partamos de la misma base.
+
+Con programación funcional me estoy refiriendo a una manera de escribir programas puramente como funciones. Funciones en el sentido matemático: una función es un valor, igual que 123, "Hola mundo" o []string{"A", "B", "C"} son valores, que, al ser _llamadas_ con otros valores como argumentos, evalúan a otro valor.
+
+Sólo con estos ingredientes somos capaces de reescribir cualquier programa escrito en un lenguaje imperativo. No hay concepto de variables reasignables (celdas de estado/memoria). Por tanto, tampoco hay bucles, ya que no habría forma de salir de ellas haciendo una comprobación de estado, como es habitual. En vez de eso, tenemos funciones recursivas.
+
+3.
+
+La programación funcional permite o facilita una serie de características. Esta es una lista no exhaustiva:
+
+- No hay efectos laterales. Esto supone que una función puede hacer exactamente una cosa: devolver un valor; no puede cambiar otros valores.
+- Transparencia referencial. Enlazando con lo anterior, razonar sobre qué hace una función es tan simple como reemplazar la llamada por su cuerpo, sustituyendo los argumentos por los valores pasados.
+- Inmutabilidad. También una consecuencia de la inexistencia de efectos laterales.
+
+Es importante recalcar que la programación funcional es un _estilo_. Un lenguaje de programación puede darte más o menos soporte para un cierto estilo, pero por lo general admiten cierta flexibilidad. Hablar de lenguajes funcionales o lenguajes imperativos, por lo general, es hablar de qué estilo «promocionan». Por lo general, hasta lenguajes fuertemente imperativos como C ofrecen herramientas funcionales. En C, las funciones son recursivas, y puedes tomar punteros a funciones para usarlas como valores. En Java, un lenguaje imperativo encima de la «ontología» de la orientación a objetos, puedes usar objetos que encapsulan métodos que cumplen una interfaz como función de primera clase (patrón Command).
+
+4. 
+
+¿Y cuál es la ventaja de todo esto? No voy a meterme mucho en esto; hay cientos de explicaciones, discusiones, etc. en Internet al respecto, con variados grados de talibanismo. Algunos de los argumentos más comunes son:
+
+- Menos bugs al no haber estado que corromper.
+- Más fácil de razonar en abstracto, al ser lenguajes declarativos más parecidos al matemático.
+- Más modularizable, por tener 1. partes más independientes (sin estado en común) y 2. más formas de combinar valores (funciones de orden superior).
+- La lazy evaluation es una implementación natural.
+- La memoization es una optimización natural.
+- Abre nuevas «ontologías» para pensar en nuestros problemas. (Sí, ya sé que la orientación a objetos es el Fin de la Historia.)
+
+Supongamos, para el resto de la charla, que es algo que realmente queremos.
+
+5.
+
+Dos papers que tratan en profundidad pero de forma accesible las características de la programación funcional:
+
+- J. Hughes. "Why functional programming matters."
+- H. G. Baker. "Equal Rights for Functional Objects or, The More Things Change, The More They Are the Same."
+
+Y esta charla de Rich Hickey profundiza sobre las diferencias ontológicas entre lenguajes funcionales e imperativos/OO.
+
+Post bueno al respecto: http://www.falkoriemenschneider.de/a__2014-09-17__Programming-without-objects.html
+
+6.
+
+Hasta qué punto depende de la habilidad, el estilo y el gusto de cada uno, pero algo de verdad debe de haber. Como hemos visto, hasta los lenguajes más imperativos incluyen características funcionales. Aquí vemos cómo un bloque de código C se divide en sentencias (imperativas) y expresiones (declarativas).
+
+int binary_search(int xs[], int key, int imin, int imax) {
+	while (imax >= imin) {
+		int imid = (imin + imax) / 2;
+		if (xs[imid] == key) {
+			return imid; 
+		} else if (xs[imid] < key) {
+			imin = imid + 1;
+		} else {				 
+			imax = imid - 1;
+		}
+	}
+	return -1;
+}
+
+7.
+
+Comparemos con una versión puramente funcional en Haskell (no es un Haskell muy idiomático, pero lo escribo así por paralelismo a C):
+
+binary_search xs key imin imax = 
+	if imax >= imin then
+		let imid = (imin + imax) / 2 in
+		if xs !! imid > key then
+			binary_search A key imin imid-1
+		else if xs !! imid < key then
+			binary_search A key imid+1 imax
+		else
+			imid
+	else
+		-1
+
+8.
+
+Por completitud, una solución en Haskell más idiomática:
+
+data BinaryTree = Branch a (BinaryTree a) (BinaryTree a) | Empty
+
+binarySearch _ Empty = Nothing
+binarySearch k (Branch x l r)
+  | k < x     = binarySearch k l
+  | k > x     = binarySearch k r
+  | otherwise = Just x
+
+¿Y cómo aplica todo esto a Go? Vamos a verlo en detalle.
+
+9.
+
+Vamos a implementar una función típica funcional: map.
+
+En Javascript:
+
+...
+
+En Haskell:
+
+...
+
+10.
+
+Vamos a hacerlo ahora en Go. Tenemos todo lo necesario: funciones como valores de primera clase. ¿No?
+
+...
+
+¿Qué es lo que falta? Los tipos. En este caso estamos utilizando int. Así quedaría:
+
+11.
+
+...
+
+Y ahora sí que funciona.
+
+¿Cuál es el problema? Estamos especificando que esta función funciona con ints, cuando lo que queremos es que funcione con cualquier tipo de valor. Suena como un trabajo para interface{}, ¿no? Así quedaría:
+
+12:
+
+...
+
+Bien, ya tenemos nuestro map independiente del tipo que le pasemos.
+
+Luego examinaremos con más detalle esta manera de implementarlo. Ahora vamos a ver hasta qué punto lo podemos llevar.
+
+13.
+
+[Paseo por github.com/tcard/functional]
+
+14.
+
+Y ahora los problemas:
+
+* Muy verboso. Pasar del tipo general al tipo concreto es explícito en todo momento. Todo lo que pasa por github.com/tcard/functional debe ser type-asserted para interactuar con el resto del código, que requiere tipos concretos.
+* Todos estas operaciones se typecheckean ¡en tiempo de ejecución!
+
+¿Realmente no hay una opción mejor que esto?
+
+15.
+
+Volvamos al ejemplo de Haskell. Haskell, aunque por este ejemplo no lo parezca, es un lenguaje estáticamente tipado. Haskell es capaz de inferir el tipo de cualquier función (siempre que no tenga restricciones ambiguas); por eso no parece tener tipos. (No es el caso en Javascript, ni en lenguajes típicamente funcionales como los varios Lisps; esos sí son dinámicos y fallan, al igual que Go, en tiempo de ejecución.)
+
+Este es el tipo inferido de map':
+
+(a -> b) -> [a] -> [b]
+
+Que, traducido en Go, sería así:
+
+func(func(a) b, []a) []b
+
+¿Qué tipos son a y b? Imagino que todos lo sabéis: son tipos genéricos. El eterno enemigo.
+
+«Genéricos» es el nombre común que recibe el «polimorfismo paramétrico». Una función o un tipo de dato es polimórfico en este sentido cuando toma como parámetros, además de una serie de valores (los argumentos), una serie de tipos. De esta manera, podemos conservar.
+
+VUELTA A 9.
+
+Observando el ejemplo de Haskell: de la misma manera que, en esta llamada en concreto, sustituimos el argumento `list` por el valor `[1, 2, 3]`, también sustituimos el parámetro de tipo `b` por el tipo correspondiente; en este caso, `Int`. (Esto no es del todo cierto. Luego veremos por qué.)
+
+16.
+
+¿Cuál es la relación entre los tipos genéricos y la programación funcional?
+
+Se podría decir que son dos conceptos ortogonales. Por ejemplo, HashMap<K, V> en Java es polimórfico paramétrico y eso no lo hace más funcional. Asimismo, functional, en sí, es puramente funcional, y no es genérico.
+
+Para construir funciones reusables, manteniendo la seguridad de tipado que nos permite capturar errores de tipado en tiempo de compilación, son necesarios los parámetros de tipo. Esto no es un concepto clave de la programación funcional; pero, una vez incorporados los tipos en el lenguaje, dejar atrás el polimorfismo paramétrico supone dejar atrás el sistema de tipos. El estilo funcional, pues, al tener más capacidad de abstracción que el estilo imperativo estructurado u OOP, exige más al sistema de tipos para integrarse plenamente. Indicio de ello es que los lenguajes funcionales tipados, como Haskell, OCaml o Rust, suelen tener sistemas de tipos más potentes que el de, por ejemplo, Java.
+
+17.
+
+En Go no hay genéricos, pero sí hay otros tipos de polimorfismo. (Recordemos que un valor, sea una función o no, es polimórfico cuando, dependiendo de alguna circunstancia adicional, puede tomar un tipo concreto u otro.) ¿En qué sentido nos ayudan a llevar un estilo funcional? Vamos a ver primero cómo se afronta en Go.
+
+18.
+
+Primero: os he engañado. En contra del saber popular, en Go sí hay polimorfismo paramétrico. La mala noticia es que sólo unas pocas funciones y tipos de datos lo tienen.
+
+map[K]V
+append([]T, T...)
+chan A
+*P
+
+Cosas como esta no compilarían:
+
+append([]int{1, 2}, "a", "b")
+
+No tienen, sin embargo, más interés, porque ahí empieza y acaba su efecto. No se pueden construir tipos ni funciones parametrizadas a partir de ellos, si no es combinándolos entre ellos mismos. Por ejemplo, es imposible crear un mapa ordenado a partir de un mapa genérico arbitrario:
+
+type OrderedMap struct {
+	m map[k]v
+	order []k
+}
+
+19.
+
+Hay otro tipo de polimorfismo: el polimorfismo ad-hoc. En el polimorfismo ad-hoc, una función toma valores de un tipo abstracto, que representa varios tipos concretos. En Go, estos tipos abstractos son las interfaces.
+
+Las bondades de las interfaces de Go para componer programas ya las conocemos todos, y si no, hay muchos recursos muy buenos en Internet al respecto. Para el caso que nos ocupa, sin embargo, vuelven a ser demasiado limitadas.
+
+La realidad es que, en un nivel más abstracto, hay _otro_ sistema de tipos con interfaces en Go: el de los operadores; y, como ocurre con las funciones builtin, son más potentes que lo que el lenguaje nos permite definir por nosotros mismos.
+
+Pensemos por ejemplo en cómo implementaríamos el operador `+` como una función. Este es un primer intento:
+
+func Add(a, b Adder) Adder
+
+Adder sería la interfaz que los tipos sumables, esto es, números y string, implementan.
+
+El problema es que esto compilaría:
+
+Add(123, "abc")
+
+Y explotaría en tiempo de ejecución, porque la implementación de Adder para el tipo int no sabría qué hacer con un Adder de tipo string. Sin embargo, si intentáramos esto:
+
+123 + "abc"
+
+Tenemos un error en tiempo de compilación. ¿Qué hay distinto en los operadores builtin de Go?
+
+Lo que ocurre, en realidad, es que la interfaz Adder debería tener un parámetro de tipo. Una función Add, por tanto, debe ser polimórfica tanto ad-hoc como paramétrica. Nuevo intento:
+
+func Add<T Adder>(a, b T) T
+
+Y, justamente, este es el tipo de la función + en Haskell:
+
+Num a => a -> a -> a
+
+(En Haskell las string no se pueden sumar, por lo que Adder se llama simplemente Num.)
+
+(Volver aquí al tipo de map'.)
+
+VUELTA A 15.
+
+De nuevo vemos cómo Go se reserva un sistema de tipos más potente para sólo cierta funcionalidad builtin.
+
+Estaréis pensando que, llegados a este punto, nos hemos olvidado un poco de la programación funcional. Y es cierto. Pero, recordemos, la capacidad de abstraer con seguridad el sistema de tipos es necesaria para integrar por completo el estilo funcional. Lo digo para que no perdamos el hilo de qué hacemos aquí.
+
+20.
+
+En fin, ¿qué opciones nos deja Go para hacer funciones polimórficas? Un paseo por la librería estándar nos muestra algunos casos de uso.
+
+21.
+
+* Interfaces
+
+Poco que observar por aquí.
+
+- io.Reader, io.Writer
+- container/heap
+- sort
+- net/http.Handler
+
+Es un poco más interesante su uso para abstraer los detalles de implementación del retorno de una función. Por ejemplo, net.Listen devuelve un Listener. Hay varios tipos en net que implementan Listener: TCPListener, FileListener, etc.
+
+La ventaja de este método es que es completamente type-safe, pero con las limitaciones que ya hemos visto.
+
+22.
+
+* interface{} por doquier
+
+Este es básicamente el mismo enfoque que toma tcard/functional. Es típico en «contenedores» que lo único que hacen con los valores es envolverlos, moverlos de un lado para otro, etc.
+
+- container/list
+- container/ring
+- sync.Pool
+
+Los problemas de esto ya los hemos estudiado.
+
+23.
+
+* Reflexión
+
+La última posibilidad es utilizar reflexión para «simular» una función polimórfica. Un buen ejemplo es encoding/json.Unmarshal.
+
+En un lenguaje dinámico como Python o PHP típicamente la función json.loads o json_decode o similar nos devuelve un valor que, dependiendo del JSON decodificado, tendrá un tipo u otro. En Go esto supondría devolver un `interface{}` que habría que type-assert para sacar el valor, con el correspondiente riesgo.
+
+Go aquí nos ofrece una alternativa interesante: nos permite _especificar el tipo de retorno que queremos_. Lo hace aceptando un argumento de salida, de tipo `interface{}`, al que podremos pasar cualquier cosa; internamente, inspeccionará con reflexión el valor que hay por debajo de esa `interface{}` y lo manipulará de una u otra manera dependiendo de su tipo.
+
+24.
+
+Es una forma de polimorfismo paramétrico, porque pasamos el tipo que queremos como parte del tipo del argumento de salida. Por desgracia, no es type-safe, pero tenemos la ventaja de no tener que hacer type-assertion.
+
+Aunque rindamos la seguridad en tiempo de compilación, con reflexión podemos ganar toda la flexibilidad de un lenguaje dinámicamente tipado con funciones-valores. Y esto sí es relevante para nosotros, programadores funcionales. tcard/functional podría tomar y devolver `interface{}` por todos lados, y usar reflexión para sacar los tipos concretos de los argumentos; sería en la práctica entonces tan funcional como Javascript, de puertas para afuera.
+
+25.
+
+Martini es un buen ejemplo de uso y abuso de esta técnica. Por otro lado, al contrario que net/http.Handler, puede explotar en tiempo de ejecución.
+
+26.
+
+Estas técnicas, aunque pueden ser suficientes en la práctica para un gran número de casos, no cubren todas las expectativas de los genéricos. Podemos sacar como conclusión que el sistema de tipos de Go no es suficientemente potente para hacer programación funcional segura, que juegue bien con el resto del lenguaje. No basta con tener closures.
+
+Y, de forma más general, la falta de genéricos daña la capacidad de abstracción del lenguaje.
+
+27.
+
+¿Por qué esto es así?
+
+El FAQ de Go nos cuenta lo siguiente:
+
+De algunas citas de Rob Pike se puede extraer una cierta divergencia en cuál es el papel del sistema de tipos.
+
+28.
+
+_What's_different_about_Go_from_an_objected_oriented_perspective_is_that_types_are_just_a_way_of_writing_down_data._Methods_are_a_completely_independent_idea.
+
+If_C++_and_Java_are_about_type_hierarchies_and_the_taxonomy_of_types,_Go_is_about_composition.
+
+Y sin embargo, vemos cómo el sistema de tipos nos impide componer programas de cierta manera.
+
+> I don't consider myself a programming language researcher
+
+> The point of Go is not to be leading edge [in programming language research]
+
+http://www.infoq.com/presentations/Go-Google
+
+Es difícil entrar en más detalle al respecto. Ningún miembro del equipo de Go, que yo haya visto, ha dado explicaciones más detalladas hacia este punto de vista. El problema de los genéricos se entiende como un problema abierto; uno más de tantos.
+
+29.
+
+Las críticas, por descontado, arrecian. Más allá del «vaya basura esto no es Javaskell» genérico, nunca mejor dicho, se oyen muchas críticas muy válidas con problemas reales que quedan irresueltos en Go.
+
+> 99% of time I don't really care if the response is delivered with a channel or a magical unicorn brought it on its horn.
+
+https://gist.github.com/kachayev/21e7fe149bc5ae0bd878
+
+Este artículo se queja de cómo impide hacer sistemas seguros en escala. Largo, detallado, con varios ejemplos reales. Merece la pena echarle un ojo.
+
+30.
+
+¿Podemos hacer algo al respecto?
+
+Cito a Rob Pike:
+
+> Q: What’s the best way to work around the lack of generics and parametric polymorphism?
+
+A from Rob: If it’s not performance critical, just use reflection. Otherwise, use Robert Griesemer’s fantastic libraries for source code rewriting, and write a tool to automate the writing of source code. The whole computing community underappreciates the value of programs that write programs. This is a perfect use for them.
+
+http://gophercon.sourcegraph.com/post/83845316771/panel-discussion-with-go-team-members
+
+Sí. Han surgido varias opciones para implementar polimorfismo paramétrico en Go.
+
+- gonerics
+- Polygo.
+
+[Fin del guión.]
+

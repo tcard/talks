@@ -1,0 +1,26 @@
+Cosas de las que hablar:
+
+- Easy language -> easy code generation.
+- Gojure.
+
+En 2014, raro es el lenguaje que no tiene trazas fuertemente funcionales.
+
+- http://www.functionaljava.org/
+- https://github.com/davidmoreno/underscore.hpp
+
+Lenguajes desde 2005: (http://en.wikipedia.org/wiki/Timeline_of_programming_languages#2000s)
+
+---
+
+Y ahí metes lo de los transducers.
+
+----
+
+Lista de features que faltan en Go. <=> Lista de features que faltan en Haskell: estado.
+
+Haskell es complejo.
+
+Contraste con:
+- Haskell
+- Java
+

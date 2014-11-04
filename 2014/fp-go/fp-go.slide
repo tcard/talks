@@ -1,0 +1,472 @@
+pure "Go" >>= functional = Nothing
+
+Toni Cárdenas
+http://tcardenas.me
+@tcardv
+
+* Programas funcionales
+
+Programas que son funciones, y nada más.
+
+Funciones que son *valores*, como son valores `123`. `"Hola,`mundo"` o `[]string{"A",`"B",`"C"}`.
+
+Valores que pueden ser _llamados_ con otros valores como argumentos, y _devuelven_ (evalúan a) otro valor.
+
+Esto implica:
+
+Funciones que son llamadas con _otras_funciones_ como argumentos.
+
+Funciones que devuelven _otra_función_.
+
+*No*hay*memoria*, variables reasignables, estado.
+
+*No*hay*bucles*, hay funciones recursivas.
+
+* Qué tiene lo funcional
+
+- No hay *efectos*laterales*. Una función puede hacer exactamente una cosa: devolver un valor; no puede cambiar otros valores.
+- *Inmutabilidad*. De hecho, un valor _no_puede_cambiar_. Dos o más observaciones de un mismo valor siempre serán completamente idénticas.
+- *Transparencia*referencial*. Razonar sobre qué hace una función es tan simple como reemplazar la llamada por su cuerpo, sustituyendo los argumentos por los valores pasados.
+
+Es un estilo soportado en diversos grados por diversos lenguajes.
+
+`int(*func1)(int,`int)`
+
+Patrón Command.
+
+* ¿Para qué?
+
+Así, por encima:
+
+- Menos bugs al no haber estado que corromper.
+- Más fácil de razonar en abstracto, al ser lenguajes declarativos más parecidos al matemático.
+- Más modularizable, por tener 1. partes más independientes (sin estado en común) y 2. más formas de combinar valores (funciones de orden superior).
+- La _lazy_evaluation_ es una implementación natural.
+- La _memoization_ es una optimización natural.
+- Abre nuevas «ontologías» para pensar en nuestros problemas. (Sí, ya sé que la orientación a objetos es el Fin de la Historia y modela el Mundo Real™ a la perfecNullPointerException.)
+
+Supongamos, para el resto de la charla, que es algo que realmente queremos.
+
+* Para saber más
+
+J. Hughes. "Why functional programming matters."
+
+H. G. Baker. "Equal Rights for Functional Objects or, The More Things Change, The More They Are the Same."
+
+R. Hickey. [[http://www.infoq.com/presentations/Are-We-There-Yet-Rich-Hickey]["Are We There Yet?"]] (Charla.)
+
+F. Riemenschneider. [[http://www.falkoriemenschneider.de/a__2014-09-17__Programming-without-objects.html]["Programming Without Objects"]] (Blog.)
+
+* Hay algo funcional entre lo imperativo
+
+C:
+
+	int binary_search(int xs[], int key, int imin, int imax) {
+		while (imax >= imin) {
+			int imid = (imin + imax) / 2;
+			if (xs[imid] == key) {
+				return imid; 
+			} else if (xs[imid] < key) {
+				imin = imid + 1;
+			} else {				 
+				imax = imid - 1;
+			}
+		}
+		return -1;
+	}
+
+* Hay algo funcional entre lo imperativo
+
+Haskell:
+
+	binary_search xs key imin imax = 
+		if imax >= imin then
+			let imid = (imin + imax) / 2 in
+			if xs !! imid > key then
+				binary_search A key imin imid-1
+			else if xs !! imid < key then
+				binary_search A key imid+1 imax
+			else
+				imid
+		else
+			-1
+
+* Hay algo funcional entre lo imperativo
+
+Haskell (idiomático):
+
+	data BinaryTree = Branch a (BinaryTree a) (BinaryTree a) | Empty
+
+	binarySearch _ Empty = Nothing
+	binarySearch k (Branch x l r)
+	  | k < x     = binarySearch k l
+	  | k > x     = binarySearch k r
+	  | otherwise = Just x
+
+* map
+
+En JavaScript:
+
+.play map-javascript.go /START/,/END/
+
+En Haskell:
+
+.play map-haskell.go /START/,/END/
+
+* map
+
+En Go:
+
+.play map-go-1.go /START/,/END/
+
+* map
+
+En Go (con tipo):
+
+.play map-go-2.go /START/,/END/
+
+* map
+
+En Go (con `interface{}`):
+
+.play map-go-interface.go /START/,/END/
+
+* github.com/tcard/functional
+
+* Problemas
+
+- Muy *verboso*. Pasar del tipo general al tipo concreto es explícito en todo momento. Todo lo que pasa por _github.com/tcard/functional_ debe ser type-asserted para interactuar con el resto del código, que requiere tipos concretos.
+- Todos estas operaciones se _typecheckean_ *¡en*tiempo*de*ejecución!*
+
+¿No hay una opción mejor que esto?
+
+* Map y el polimorfismo paramétrico
+
+	(a -> b) -> [a] -> [b]
+
+En Go:
+
+	func(func(a) b, []a) []b
+
+Donde `a` y `b` son *genéricos*.
+
+«Genéricos» es el nombre común que recibe el «polimorfismo paramétrico».
+
+Una función o un tipo de dato es polimórfico en este sentido cuando toma como parámetros, además de una serie de valores (los argumentos), una serie de tipos.
+
+Podemos conservar un *typecheck* estricto: `a` y `b`, en una llamada, son reemplazados cada uno por un concreto, estable, y _typecheckeado_.
+
+* Relación entre tipos y programación funcional
+
+Conceptos ortogonales.
+
+- `HashMap<K,`V>` es genérico y no es funcional.
+- _github.com/tcard/functional_ es funcional y no es genérico.
+
+Para construir funciones reusables *en*un*lenguaje*tipado* son necesarios los parámetros de tipo.
+
+El estilo funcional, al ser más expresivo, es *exigente* con los lenguajes estáticamente tipados.
+
+Ejemplos: Haskell, OCaml, Rust.
+
+* Otros polimorfismos
+
+* Builtins polimórficos paramétricos
+
+	map[K]V
+	append([]T, T...)
+	chan A
+	*P
+
+Cosas como esta no compilan:
+
+	append([]int{1, 2}, "a", "b")
+
+Pero no se pueden extender. Algo así es imposible:
+
+	type OrderedMap struct {
+		m map[k]v
+		order []k
+	}
+
+* Polimorfismo ad hoc
+
+Interfaz: abstracción sobre tipos concretos. Un valor puede _adoptar_el_tipo_ de las interfaces que su tipo concreto satisface.
+
+Más expresivo en operadores builtin:
+
+    func Add(Adder, Adder) Adder
+
+    Add(123, "abc") // No debería compilar, pero compila.
+
+    123 + "abc" // No compila.
+
+
+Abstractamente, + tiene un tipo tal que así:
+
+    func Add<a Adder>(a, a) a
+
+Como en Haskell:
+
+	Num a => a -> a -> a
+
+Necesitamos parámetros para implementar `map`.
+
+* En busca del polimorfismo Idiomático™
+
+* Interfaces
+
+Obviamente.
+
+- io.Reader, io.Writer
+- container/heap
+- sort
+- net/http.Handler
+- net.Listener
+
+Las interfaces son una herramienta de abstracción muy simple y bastante versátil.
+
+Pero, como hemos visto, son insuficientes.
+
+* interface{} por doquier
+
+Como en _github.com/tcard/functional_.
+
+«Contenedores» que lo único que hacen con los valores es envolverlos, moverlos de un lado para otro, etc.
+
+- container/list
+- container/ring
+- sync.Pool
+
+Los problemas de esto ya los hemos estudiado.
+
+* Reflexión
+
+«Simular» una función polimórfica con `reflect`.
+
+.code json-iface.go /START JSON/,/END JSON/
+
+.play json-iface.go /START IFACE/,/END IFACE/
+
+.play json-struct.go /START STRUCT/,/END STRUCT/
+
+* Reflexión
+
+`json.Unmarshal` emplea una forma de polimorfismo paramétrico, tomando los parámetros de tipo del argumento.
+
+No hay seguridad en tiempo de compilación, pero sí toda la flexibilidad de un lenguaje dinámicamente tipado.
+
+Es, cuanto menos, tedioso de escribir.
+
+* Un Martini con inyector; reflectado, no typecheckeado.
+
+Martini es el perfecto ejemplo de uso y abuso de interfaces.
+
+.play martini.go /START/,/END/
+
+.iframe http://localhost:3000/hello/gophers
+
+.link https://github.com/go-martini/martini
+
+Se podrían hacer cosas similares para _github.com/tcard/functional_.
+
+* Conclusión
+
+El sistema de tipos de Go no es suficientemente potente para hacer programación funcional segura, que juegue bien con el resto del lenguaje.
+
+No basta con tener closures.
+
+La falta de genéricos daña la capacidad de abstracción del lenguaje.
+
+* ¿Por qué esto es así?
+
+FAQ de Go:
+
+"Generics may well be added at some point. We don't feel an urgency for them, although we understand some programmers do.
+
+Generics are convenient but they come at a cost in complexity in the type system and run-time. We haven't yet found a design that gives value proportionate to the complexity, although we continue to think about it. Meanwhile, Go's built-in maps and slices, plus the ability to use the empty interface to construct containers (with explicit unboxing) mean in many cases it is possible to write code that does what generics would enable, if less smoothly.
+
+This remains an open issue."
+
+* Rob Pike no es su tipo
+
+(Énfasis mío.)
+
+"What's different about Go from an objected oriented perspective is that types are *just*a*way*of*writing*down*data*. Methods are a completely independent idea."
+
+"If C++ and Java are about type *hierarchies*and*the*taxonomy*of*types*, Go is about composition."
+
+"I don't consider myself a programming language researcher. [...] The point of Go is not to be leading edge [in programming language research]."
+
+Un par de discusiones en `golang-nuts`: [[https://groups.google.com/forum/#!searchin/golang-nuts/reduce$20for$20loop/golang-nuts/RKymTuSCHS0/VQ_poJ9jgLUJ][1]], [[https://groups.google.com/forum/#!searchin/golang-nuts/reduce$20for$20loop/golang-nuts/BmFX-PF9bSA/JhcdFJfTNBEJ][2]].
+
+"But that means that any use of these functions can be written as a trivial loop."
+
+Y poco más.
+
+* Críticas
+
+.link https://gist.github.com/kachayev/21e7fe149bc5ae0bd878 Channels Are Not Enough, or Why Pipelining Is Not That Easy
+
+"99% of time I don't really care if the response is delivered with a channel or a magical unicorn brought it on its horn."
+
+"Too many things to keep in mind and constantly memorize: when and how to close channels, how to propagate errors, how to free resources."
+
+"What I really want here is:
+
+    func merge[T](cs ...<-chan T) <-chan T
+"
+
+* ¿Podemos hacer algo al respecto?
+
+"Q: What’s the best way to work around the lack of generics and parametric polymorphism?
+
+A from Rob: If it’s not performance critical, just use reflection. Otherwise, use Robert Griesemer’s fantastic libraries for source code rewriting, and write a tool to automate the writing of source code. The whole computing community underappreciates the value of programs that write programs. This is a perfect use for them."
+
+- [[https://github.com/joeshaw/gengen][gengen]]
+- [[http://bouk.co/blog/idiomatic-generics-in-go/][gonerics]]
+
+* Polygo
+
+.link http://github.com/tcard/polygo
+
+*En*desarrollo*.
+
+Superset de Go con polimorfismo paramétrico typecheckeado que compila a Go con polimorfismo basado en `reflect`.
+
+* Polygo
+
+Nuestro `map`:
+
+.code -edit polygo-map.polygo
+
+* Polygo
+
+Se traduce a:
+
+.play polygo-map.go /START A/,/START B/
+
+(...)
+
+* Polygo
+
+(...)
+
+.play polygo-map.go /START B/,/END/
+
+* Polygo
+
+Lazy map con _github.com/tcard/functional_:
+
+	type <a>Thunk func(a) *<a>Pair
+	type <a>Pair struct {
+		head a
+		tail *<a>Thunk
+	}
+
+	func (thunk *<a>Thunk) Map(f func(a) b) *<b>Thunk {
+		var ret <b>Thunk = func(b) *<b>Pair {
+			pair := force(thunk)
+			return &<b>Pair{f(pair.head), Map(f, pair.tail)}
+		}
+		return &ret
+	}
+
+	SliceToList([]int{1, 2, 3}).Map(func(i int) string {
+		return strconv.Itoa(int)
+	})
+
+* Polygo
+
+Transducers:
+
+	type <a, b, r>Transducer func(func(r, a) r) func(r, b) r
+
+	func <a, b, r>Mapping(f func(b) a) <a, b, r>Transducer {
+		return func(reducing func(r, a) r) func(r, b) r {
+			return func(result r, input b) r {
+				return reducing(r, f(a))
+			}
+		}
+	}
+
+* Conclusión (personal).
+
+¿Es Go un [[http://www.paulgraham.com/avg.html][Blub]]?
+
+"But when our hypothetical Blub programmer looks in the other direction, up the power continuum, he doesn't realize he's looking up. What he sees are merely weird languages."
+
+La idea de Go va más allá de eso.
+
+"In today's programming world, there seems to be a lot of emphasis on the power of abstraction. I think there's not enough emphasis on the power of breaking abstractions. [...] Where before you only saw two different layers, you now begin to see how the layers are related and how they can interact. And every broken abstraction is a chance to see or create a new concept that may not have even been expressible before."
+
+.link http://research.swtch.com/goabstract Broken abstractions in Go
+
+* Complejo vs. simple, grande vs. pequeño.
+
+Suelen decir que la falta de genéricos, o sum types, o excepciones, o... hacen el lenguaje más simple.
+
+Yo diría más bien que hacen el *lenguaje*más*pequeño*. Tanto en especificación como en ejecución, lectura, escritura, y carga cognitiva.
+
+Go tiene herramientas potentes, pero pequeñas.
+
+Las abstracciones existentes son suficientes para la mayoría de los _casos_prácticos_.
+
+- Interfaces: versión pequeña de las typeclasses.
+- Builtins: versión pequeña de polimorfismo paramétrico. Y más compleja, porque son casos especiales.
+
+* Productividad en lo pequeño
+
+Una intepretación común es que la gente (capaz de|que invierte el esfuerzo necesario para) dominar la programación funcional avanzada es entonces *órdenes*de*magnitud*más*productiva*, porque tiene herramientas más poderosas que un programador OOP/estructural.
+
+Go lo intenta por otro lado: menos poder, más enfocado, más pequeño.
+
+Menos cosas que dominar puede suponer más productividad.
+
+El código es _obvio_.
+
+* Menos es más, exponencialmente
+
+Cosas más simples en Haskell que en Java:
+
+- No hay estado.
+- No hay condiciones de carrera.
+- Datos y funciones separados.
+- No hay sentencias, todo son expresiones o definiciones.
+- No hay control de flujo explícito.
+- No hay `null`.
+
+Recuerda a la lista de de Go sobre C/C++:
+
+.link http://commandcenter.blogspot.com.es/2012/06/less-is-exponentially-more.html Less is exponentially more
+
+¿Puede haber una síntesis?
+
+* Go y FP en contexto
+
+[[http://en.wikipedia.org/wiki/Timeline_of_programming_languages#2000s][Desde 2004]]:
+
+- Groovy
+- F#
+- Fortress
+- Idris
+- Rust
+- Ceylon
+- Elm
+- Elixir
+- Julia
+- Hack
+- Swift
+- Clojure
+
+* Go y FP en contexto
+
+- [[http://www.functionaljava.org/][Functional Java]]
+- [[github.com/facebook/immutable-js][immutable-js]]
+- [[https://github.com/davidmoreno/underscore.hpp][underscore.hpp]]
+
+* Go y FP en contexto
+
+Go es una excepción en la tendencia hacia lo funcional.
+
+¿Hay algo que aprender de ello?

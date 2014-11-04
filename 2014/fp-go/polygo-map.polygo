@@ -1,0 +1,14 @@
+func <a, b>Map(f func(a) b, list []a) []b { // HL
+	if len(list) == 0 {
+		return []b{}
+	} else {
+		return append([]b{f(list[0])}, Map(f, list[1:])...)
+	}
+}
+
+func main() {
+	mapped := Map(func(i int) string { // HL
+		return strconv.Itoa(i + 1)
+	}, []int{1, 2, 3}) // HL
+	fmt.Println(mapped)
+}

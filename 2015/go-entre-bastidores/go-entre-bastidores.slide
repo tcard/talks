@@ -1,0 +1,680 @@
+Go entre bastidores
+Cómo se ejecuta tu código
+
+Toni Cárdenas
+Programmer at Tyba
+toni@tcardenas.me
+@tcardv
+
+* ¿Qué ocurre cuando compilas?
+
+Vamos a explorarlo.
+
+.link https://github.com/golang/go/tree/9462b
+
+En esta charla hablamos del funcionamiento básico del compilador, y cómo engancha con llamadas a la runtime.
+
+En próximas, cómo funcionan las distintas partes de la runtime: scheduler, GC, estructuras de datos, gestión de memoria, reflexión.
+
+* Programa de ejemplo
+
+.play 1.go
+
+* Ensamblador
+
+	go build -gcflags='-S' 1.go
+
+El código de `foo`:
+
+	"".foo t=1 size=32 value=0 args=0x18 locals=0x0
+		0x0000 00000 (1.go:3)	TEXT	"".foo(SB), $0-24
+		0x0000 00000 (1.go:3)	NOP
+		0x0000 00000 (1.go:3)	NOP
+		0x0000 00000 (1.go:3)	FUNCDATA	$0, gclocals·790e5cc5051fc0affc980ade09e929ec(SB)
+		0x0000 00000 (1.go:3)	FUNCDATA	$1, gclocals·33cdeccccebe80329f1fdbee7f5874cb(SB)
+		0x0000 00000 (1.go:4)	MOVQ	"".a+8(FP), BX
+		0x0005 00005 (1.go:4)	MOVQ	"".b+16(FP), BP
+		0x000a 00010 (1.go:4)	ADDQ	BP, BX
+		0x000d 00013 (1.go:4)	MOVQ	BX, "".~r2+24(FP)
+		0x0012 00018 (1.go:4)	RET
+
+* Ensamblador
+
+	go build -gcflags='-S' 1.go
+
+El código de `main`:
+
+	"".main t=1 size=32 value=0 args=0x0 locals=0x0
+		0x0000 00000 (1.go:7)	TEXT	"".main(SB), $0-0
+		0x0000 00000 (1.go:7)	NOP
+		0x0000 00000 (1.go:7)	NOP
+		0x0000 00000 (1.go:7)	FUNCDATA	$0, gclocals·33cdeccccebe80329f1fdbee7f5874cb(SB)
+		0x0000 00000 (1.go:7)	FUNCDATA	$1, gclocals·33cdeccccebe80329f1fdbee7f5874cb(SB)
+		0x0000 00000 (1.go:8)	MOVQ	$13, BX
+		0x0007 00007 (1.go:8)	MOVQ	$31, AX
+		0x000e 00014 (1.go:8)	ADDQ	AX, BX
+		0x0011 00017 (1.go:9)	RET
+
+* Ensamblador: guía rápida
+
+.link https://golang.org/doc/asm
+
+    $n          constante
+    XYZ         registro
+    SB          memoria global
+    FP          argumentos
+    SP          memoria local: variables, temporales, argumentos para llamadas a funciones
+    n(XYZ)      dirección de memoria almacenada en el registro XYZ, más n posiciones.
+    foo(XYZ)    dirección de memoria almacenada en el registro XYZ, más el offset asociado a foo.
+    foo+n(XYZ)  lo que hay en n(XYZ), que se llama foo.
+    TEXT        declara un símbolo.
+    FUNCDATA    información para el Garbage Collector.
+
+* ¿Por qué los cuerpos de las dos funciones son casi idénticos?
+
+`main`:
+
+	0x0000 00000 (1.go:8)	MOVQ	$13, BX
+	0x0007 00007 (1.go:8)	MOVQ	$31, AX
+	0x000e 00014 (1.go:8)	ADDQ	AX, BX
+	0x0011 00017 (1.go:9)	RET
+
+Modo debug de optimizaciones (`-m`):
+
+	prueba.go:3: can inline foo
+	prueba.go:7: can inline main
+	prueba.go:8: inlining call to foo 
+
+Desactivando el inliner (`-l`):
+
+	0x0013 00019 (prueba.go:8)	MOVQ	$13, (SP)
+	0x001b 00027 (prueba.go:8)	MOVQ	$31, 8(SP)
+	0x0024 00036 (prueba.go:8)	PCDATA	$0, $0
+	0x0024 00036 (prueba.go:8)	CALL	"".foo(SB)
+	0x0029 00041 (prueba.go:8)	MOVQ	16(SP), BX
+	0x002e 00046 (prueba.go:9)	ADDQ	$24, SP
+	0x0032 00050 (prueba.go:9)	RET
+
+* ¿Cómo hemos llegado hasta aquí?
+
+El código del comando `go` está en
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/go $GOROOT/src/cmd/go
+
+`func`main` está en
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/go/main.go#L115 main.go:115
+
+Parsea flags y llama al comando, en este caso `build`.
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/go/build.go#L31 build.go:31
+
+Pasando `-x`, vemos cada comando:
+
+	WORK=/var/folders/yc/xgyv33g90y95zfgpfvspprt80000gn/T/go-build473187971
+	mkdir -p $WORK/command-line-arguments/_obj/
+	cd /Users/tcard/Desktop/charla
+	/usr/local/go/pkg/tool/darwin_amd64/compile -o $WORK/command-line-arguments.a -trimpath $WORK -p main -complete -buildid 4fedc3e7ccda9ad67184641b32b98ff36e72e418 -D _/Users/tcard/Desktop/charla -I $WORK -pack ./prueba.go
+	cd .
+	/usr/local/go/pkg/tool/darwin_amd64/link -o prueba -L $WORK -extld=clang -buildmode=exe -buildid=4fedc3e7ccda9ad67184641b32b98ff36e72e418 $WORK/command-line-arguments.a
+
+* El comando compile
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/main.go $GOROOT/src/cmd/compile
+
+Llama al específico de la arquitectura:
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/amd64/galign.go#L68 $GOROOT/src/cmd/compile/internal/amd64/galign.go:68
+
+Y llama al compilador genérico:
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/lex.go#L118 $GOROOT/src/cmd/compile/internal/gc/lex.go:118
+
+* gc.Main
+
+1. Declara unos cuantos paquetes «mágicos», como `unsafe` y `runtime`.
+2. Parsea las flags.
+3. Inicializa el lexer con la función `lexinit`. Se declaran algunos símbolos básicos: tipos, builtins, etc.
+
+	{"notwithstanding", LIGNORE, Txxx, OXXX},
+	{"thetruthofthematter", LIGNORE, Txxx, OXXX},
+	{"despiteallobjections", LIGNORE, Txxx, OXXX},
+	{"whereas", LIGNORE, Txxx, OXXX},
+	{"insofaras", LIGNORE, Txxx, OXXX},
+
+4. Inicializa tipos con `typeinit`.
+5. Parsea cada archivo que se ha pasado como argumento, llamando a `yyparse`. El parser es tipo `yacc`. Gramática:
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/go.y go.y
+
+* gc.Main
+
+6. Hace typecheck con la función `typecheck`, `checkreturn`.
+7. Decide cómo capturar variables en closures con `capturevars`.
+8. Hace inlining, con `visitBottomUp` y `inlcalls`.
+9. Hace análisis de escape (para decidir si alojar cosas en la stack o en la heap) con `escapes`.
+10. Procesa closures con `transformclosure`.
+11. Compila las funciones con `funccompile`.
+12. Crea la funcion init con `fninit`, por donde empezará el programa.
+13. Escribe el código objeto compilado con `dumpobj`.
+
+* Parser: transformando texto en estructuras de datos
+
+	file:
+		loadsys
+		package
+		imports
+		xdcl_list
+		{
+			xtop = concat(xtop, $4);
+		}
+
+Regla para la lista de declaraciones (`foo` y `main`):
+
+	xdcl_list:
+		{
+			$$ = nil;
+		}
+	|	xdcl_list xdcl ';'
+		{
+			$$ = concat($1, $2);
+			// ... más líneas omitidas.
+		}
+
+* Parser: transformando texto en estructuras de datos
+
+Cada declaración:
+
+	xdcl:
+		{
+			Yyerror("empty top-level declaration");
+			$$ = nil;
+		}
+	|	common_dcl
+	|	xfndcl
+		{
+			$$ = list1($1);
+		}
+	|	non_dcl_stmt
+		{
+			Yyerror("non-declaration statement outside function body");
+			$$ = nil;
+		}
+	|	error
+		{
+			$$ = nil;
+		}
+
+* Parser: transformando texto en estructuras de datos
+
+Funciones:
+
+	xfndcl:
+		LFUNC fndcl fnbody
+		{
+			$$ = $2;
+			if $$ == nil {
+				break;
+			}
+			$$.Nbody = $3;
+			funcbody($$);
+			// ... más líneas omitidas.
+		}
+
+`LFUNC` es `func`
+
+`fndcl` es `foo(a,`b`int)`int`
+
+`fnbody` es `return`{`a`+`b`}`
+
+* Parser: tipos de datos asociados a cada regla.
+
+Uno de:
+
+	node *Node
+	list *NodeList
+	typ *Type
+	sym *Sym
+	val Val
+	i int
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/go.y#L69 go.y:69
+	
+	%type	<node>	xfndcl typedcl start_complit
+
+* Parser: Node
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/syntax.go#L13 syntax.go:13
+
+	type Node struct {
+		// Tree structure.
+		// Generic recursive walks should follow these fields.
+		Left  *Node
+		Right *Node
+		Ninit *NodeList
+		Nbody *NodeList
+		List  *NodeList
+		Rlist *NodeList
+		// most nodes
+		Type *Type
+		Orig *Node // original form, for printing, and tracking copies of ONAMEs
+		// func
+		Func *Func
+		// ONAME
+		Name *Name
+		Sym *Sym        // various
+		E   interface{} // Opt or Val, see methods below
+		Op          uint8
+		// ... más campos omitidos.
+	}
+
+* Parser: transformando texto en estructuras de datos
+
+.iframe http://localhost:8000/slide/ast/assets/player/KeynoteDHTMLPlayer.html 600 800
+
+* Parser: terminando.
+
+El proceso es similar para `main`, pero vamos a centrarnos en `foo`.
+
+Ahora, en la variable global `xtop`, tenemos el AST.
+
+Nos saltamos el typechecker y los demás pasos hasta el 11: `funccompile`.
+
+* funccompile
+
+	// Phase 8: Compile top level functions.
+	for l := xtop; l != nil; l = l.Next {
+		if l.N.Op == ODCLFUNC {
+			funccompile(l.N)
+		}
+	}
+
+La primera función es `foo`.
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/dcl.go#L1459 funccompile (dcl.go:1459)
+
+inicializa y llama a
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/pgen.go#L332 compile (pgen.go:332)
+
+* compile: dowith
+
+Primero llama a `dowith` para decidir el tamaño en memoria.
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/align.go#L112 dowith (align.go:112)
+
+	case TFUNC:
+		t1 := typ(TFUNCARGS)
+		t1.Type = t
+		checkwidth(t1)
+		// width of func type is pointer
+		w = int64(Widthptr)
+
+	case TFUNCARGS:
+		t1 := t.Type
+		w = widstruct(t.Type, *getthis(t1), 0, 0)
+		w = widstruct(t.Type, *getinarg(t1), w, Widthreg)
+		w = widstruct(t.Type, *Getoutarg(t1), w, Widthreg)
+		t1.Argwid = w
+		t.Align = 1
+
+La función (`TFUNC`) tiene el tamaño de un puntero (`Widthptr`); cada argumento, el de su tipo.
+
+* compile: walk
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/walk.go#L20 walk (walk.go:20)
+
+El flag `-W` debuggea esta fase:
+
+	before foo
+	.   RETURN l(4) tc(1)
+	.   RETURN-list
+	.   .   ADD l(4) tc(1) int
+	.   .   .   NAME-main.a u(1) a(true) g(2) l(3) x(0+0) class(PPARAM) f(1) tc(1) used(true) int
+	.   .   .   NAME-main.b u(1) a(true) g(3) l(3) x(8+0) class(PPARAM) f(1) tc(1) used(true) int
+	after walk foo
+	.   RETURN l(4) tc(1)
+	.   RETURN-list
+	.   .   AS u(2) l(4) tc(1)
+	.   .   .   NAME-main.~r2 u(1) a(true) g(1) l(3) x(16+0) class(PPARAMOUT) f(1) int
+	.   .   .   ADD u(2) l(4) tc(1) int
+	.   .   .   .   NAME-main.a u(1) a(true) g(2) l(3) x(0+0) class(PPARAM) f(1) tc(1) used(true) int
+	.   .   .   .   NAME-main.b u(1) a(true) g(3) l(3) x(8+0) class(PPARAM) f(1) tc(1) used(true) int
+	enter foo
+	.   AS l(3)
+	.   .   NAME-main.~r2 u(1) a(true) g(1) l(3) x(16+0) class(PPARAMOUT) f(1) int
+
+* compile: walk
+
+En el after, el return ha introducido una asignación a `~r2`.
+
+Como vimos en el ensamblador:
+
+		0x0000 00000 (prueba.go:4)	MOVQ	"".a+8(FP), BX
+		0x0005 00005 (prueba.go:4)	MOVQ	"".b+16(FP), BP
+		0x000a 00010 (prueba.go:4)	ADDQ	BP, BX
+		0x000d 00013 (prueba.go:4)	MOVQ	BX, "".~r2+24(FP)
+		0x002e 00046 (prueba.go:9)	ADDQ	$24, SP
+		0x0032 00050 (prueba.go:9)	RET
+
+* compile: generación de código
+
+	ptxt = Thearch.Gins(obj.ATEXT, nam, &nod1)
+	Afunclit(&ptxt.From, Curfn.Func.Nname)
+
+`Gins` ("generate instruction") es específica de la arquitectura.
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/amd64/galign.go#L102 $GOROOT/src/cmd/compile/internal/amd64/galign.go:102
+
+	/*
+	 * generate one instruction:
+	 *	as f, t
+	 */
+	func gins(as int, f *gc.Node, t *gc.Node) *obj.Prog
+
+nod1 es un nodo para una constante con valor 0 creado un par de líneas arriba:
+
+	Nodconst(&nod1, Types[TINT32], 0)
+
+Y, efectivamente, eso es (más o menos) lo que vemos:
+
+	0x0000 00000 (prueba.go:3)	TEXT	"".foo(SB), $0-24
+
+* Generando el cuerpo
+
+	Genlist(Curfn.Nbody)
+
+Llama a `gen` por cada statement, y esta a `cgen_ret` para `~r2`=`return`a`+`b`.
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/cgen.go#L2623 cgen_ret (cgen.go:2623)
+
+	func cgen_ret(n *Node) {
+		if n != nil {
+			Genlist(n.List) // copy out args
+		}
+		if Hasdefer != 0 {
+			Ginscall(Deferreturn, 0)
+		}
+		Genlist(Curfn.Func.Exit)
+		p := Thearch.Gins(obj.ARET, nil, nil)
+		if n != nil && n.Op == ORETJMP {
+			p.To.Type = obj.TYPE_MEM
+			p.To.Name = obj.NAME_EXTERN
+			p.To.Sym = Linksym(n.Left.Sym)
+		}
+	}
+
+* Generando el cuerpo
+
+	Genlist(n.List) // copy out args
+
+`n.List` sólo tiene `~r2`=`return`a`+`b`, un nodo `OAS` (asignación). En `gen`:
+
+	case OAS:
+		if gen_as_init(n) {
+			break
+		}
+		Cgen_as(n.Left, n.Right)
+
+Cgen_as (gen.go:906) → gen_as_wb → cgen_wb( `a`+`b` , `~r2`) (cgen.go:22)
+
+	case OADD:
+		a = Thearch.Optoas(int(n.Op), nl.Type)
+		goto sbop
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/cgen.go#L432 cgen_wb (cgen.go:432)
+
+`Optoas` devuelve el opcode `ADDQ` para `amd64`.
+
+* Generando el cuerpo
+
+En `sbop`, primero se asigna cada operando a un registro (algoritmo Ullman-Sathi):
+
+	Regalloc(&n1, nl.Type, res)
+	Cgen(nl, &n1)
+	// ...
+	Regalloc(&n2, nr.Type, nil)
+	Cgen(nr, &n2)
+
+`Cgen` genera cada operando; en este caso, son variables. Esto genera:
+
+		0x0000 00000 (prueba.go:4)	MOVQ	"".a+8(FP), BX
+		0x0005 00005 (prueba.go:4)	MOVQ	"".b+16(FP), BP
+
+Y después:
+
+	Thearch.Gins(a, &n2, &n1)	// a = ADDQ aquí.
+
+Que genera la suma:
+
+	0x000a 00010 (prueba.go:4)	ADDQ	BP, BX
+
+* Generando el cuerpo
+
+Volviendo:
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/cgen.go#L2623 cgen_ret (cgen.go:2623)
+
+	func cgen_ret(n *Node) {
+		// ...
+		p := Thearch.Gins(obj.ARET, nil, nil)
+		// ...
+	}
+
+Falta el:
+	
+	p := Thearch.Gins(obj.ARET, nil, nil)
+
+que es:
+	
+	0x0012 00018 (prueba.go:4)	RET
+
+Y terminamos.
+
+* Recapitulando.
+
+Nos hemos saltado:
+
+- El typechecking, que en este caso es trivial.
+- Varias pasadas de análisis que no afectan a este caso.
+- En inliner, que hemos desactivado.
+- Cómo exactamente se manejan los registros, direcciones de memoria, etc.
+- Cómo se pasa el código objeto a un fichero (`dumpobj`).
+- `main`, `init`.
+- Tabla de símbolos (cómo se resuelve `a` y `b` a `"".a+8(FP)` y `"".b+16(FP)`).
+
+Pero hemos visto el _pipeline_ general. Y cómo no es mágico.
+
+Ahora veamos casos más interesantes.
+
+* Siguiente programa
+
+.play 2.go
+
+* Siguiente programa
+
+En este caso el código generado es significativamente más grande.
+
+Pero nos sirve de ejemplo de varias cosas a la vez.
+
+Vayamos línea por línea.
+
+* Generando un map
+
+	m := map[string]int{}
+
+Genera:
+
+	0x001f 00031 (/Users/tcard/Desktop/charla/2.go:4)	LEAQ	type.map[string]int(SB), BX
+	0x0026 00038 (/Users/tcard/Desktop/charla/2.go:4)	MOVQ	BX, (SP)
+	0x002a 00042 (/Users/tcard/Desktop/charla/2.go:4)	MOVQ	$0, 8(SP)
+	0x0033 00051 (/Users/tcard/Desktop/charla/2.go:4)	MOVQ	$0, 16(SP)
+	0x003c 00060 (/Users/tcard/Desktop/charla/2.go:4)	MOVQ	$0, 24(SP)
+	0x0045 00069 (/Users/tcard/Desktop/charla/2.go:4)	PCDATA	$0, $0
+	0x0045 00069 (/Users/tcard/Desktop/charla/2.go:4)	CALL	runtime.makemap(SB)
+	0x004a 00074 (/Users/tcard/Desktop/charla/2.go:4)	MOVQ	32(SP), AX
+
+
+Con `-W` vemos aproximadamente el AST antes de alterarlo:
+
+	.   AS l(4) colas(true) tc(1)
+	.   .   NAME-main.m u(1) a(true) g(1) l(4) x(0+0) class(PAUTO) f(1) tc(1) used(true) MAP-map[string]int
+	.   .   MAPLIT l(4) esc(no) tc(1) MAP-map[string]int
+	.   .   .   TYPE <S> l(4) tc(1) type=MAP-map[string]int MAP-map[string]int
+
+* Generando un map
+
+Y después:
+
+	.   .   AS u(100) l(4) tc(1)
+	.   .   .   NAME-main.m u(1) a(true) g(1) l(4) x(0+0) class(PAUTO) f(1) tc(1) assigned used(true) MAP-map[string]int
+	.   .   .   CALLFUNC u(100) l(4) tc(1) MAP-map[string]int
+	.   .   .   .   NAME-runtime.makemap u(1) a(true) l(2) x(0+0) class(PFUNC) tc(1) used(true) FUNC-func(*byte, int64, *map.hdr[string]int, *map.bucket[string]int) map[string]int
+	.   .   .   CALLFUNC-list
+	.   .   .   .   AS u(2) l(4) tc(1)
+	.   .   .   .   .   INDREG-SP a(true) l(4) x(0+0) tc(1) runtime.mapType·2 PTR64-*byte
+	.   .   .   .   .   ADDR u(2) a(true) l(4) tc(1) PTR64-*uint8
+	.   .   .   .   .   .   NAME-type.map[string]int u(1) a(true) l(4) x(0+0) class(PEXTERN) tc(1) uint8
+	.   .   .   .   AS u(1) l(4) tc(1)
+	.   .   .   .   .   INDREG-SP a(true) l(4) x(8+0) tc(1) runtime.hint·3 int64
+	.   .   .   .   .   LITERAL-0 u(1) a(true) l(4) tc(1) int64
+	.   .   .   .   .   .   LITERAL-0 u(1) a(true) l(4) tc(1) int64
+	.   .   .   .   AS u(1) l(4) tc(1)
+	.   .   .   .   .   INDREG-SP a(true) l(4) x(16+0) tc(1) runtime.mapbuf·4 PTR64-*map.hdr[string]int
+	.   .   .   .   .   LITERAL-nil u(1) a(true) l(4) tc(1) PTR64-*map.hdr[string]int
+	.   .   .   .   AS u(1) l(4) tc(1)
+	.   .   .   .   .   INDREG-SP a(true) l(4) x(24+0) tc(1) runtime.bucketbuf·5 PTR64-*map.bucket[string]int
+	.   .   .   .   .   LITERAL-nil u(1) a(true) l(4) tc(1) PTR64-*map.bucket[string]int
+
+* Generando un map
+
+Las llamadas `walk → walkstmtlist → walkstmt` acaban en
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/walk.go#L1617 walk (walk.go:1617)
+
+	case OARRAYLIT, OMAPLIT, OSTRUCTLIT, OPTRLIT:
+		var_ := temp(n.Type)
+		anylit(0, n, var_, init)
+		n = var_
+		goto ret
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/sinit.go#L1180 anylit (sinit.go:1180)
+
+	case OMAPLIT:
+		if t.Etype != TMAP {
+			Fatal("anylit: not map")
+		}
+		maplit(ctxt, n, var_, init)
+	}
+
+* Generando un map
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/sinit.go#878 maplit (sinit.go:878)
+
+	a := Nod(OMAKE, nil, nil)
+	a.List = list1(typenod(n.Type))
+	litas(var_, a, init)
+
+Construye en `var_` una asignación a un nodo `OMAKE`.
+
+	func litas(l *Node, r *Node, init **NodeList) {
+		a := Nod(OAS, l, r)
+		typecheck(&a, Etop)
+		walkexpr(&a, init)
+		*init = list(*init, a)
+	}
+
+Asigna el `OMAKE` a la variable `m`; `typecheck` convierte el `OMAKE` en `OMAKEMAP`.
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/typecheck.go#L1894 typecheck1 (typecheck.go:1894)
+
+Y volvemos a hacer `walkexpr`.
+
+* Generando un map
+
+.link https://github.com/golang/go/tree/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/compile/internal/gc/walk.go#L1439 walkexpr (walk.go:1439)
+
+	case OMAKEMAP:
+		t := n.Type
+		fn := syslook("makemap", 1)
+		a := nodnil() // hmap buffer
+		r := nodnil() // bucket buffer
+		// ...
+		substArgTypes(fn, hmap(t), mapbucket(t), t.Down, t.Type)
+		n = mkcall1(fn, n.Type, init, typename(n.Type), conv(n.Left, Types[TINT64]), a, r)
+		goto ret
+
+`mkcall1` crea un nodo `OCALL` que llama a `runtime.makemap`.
+
+	func makemap(t *maptype, hint int64, h *hmap, bucket unsafe.Pointer) *hmap
+
+.link https://github.com/golang/go/blob/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/runtime/hashmap.go#L187 $GOROOT/src/runtime/hashmap.go:187
+
+* Iniciando el programa
+
+Ya hemos visto cómo el programa llama a la runtime.
+
+¿Cómo llama la runtime al programa?
+
+Para verlo, tenemos que irnos al linker.
+
+.link https://github.com/golang/go/blob/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/cmd/newlink/prog.go#L168 $GOROOT/src/cmd/newlink/prog.go:168
+
+Entre otras cosas:
+
+	if p.StartSym == "" {
+		p.StartSym = fmt.Sprintf("_rt0_%s_%s", p.GOARCH, p.GOOS)
+	}
+
+En mi caso, el programa empieza en el símbolo `_rt0_amd64_darwin`.
+
+* Iniciando el programa
+
+`_rt0_amd64_darwin` llama a `rt0_go`.
+
+.link https://github.com/golang/go/blob/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/runtime/asm_amd64.s#L10 $GOROOT/src/runtime/asm_amd64.s:10
+
+Después de un preludio:
+
+	// create a new goroutine to start program
+	MOVQ	$runtime·mainPC(SB), AX		// entry
+	PUSHQ	AX
+	PUSHQ	$0			// arg size
+	CALL	runtime·newproc(SB)
+	POPQ	AX
+	POPQ	AX
+
+	// start this M
+	CALL	runtime·mstart(SB)
+
+Las gorrutinas (G) se agrupan en threads (M).
+
+Creamos una gorrutina con la función `$runtime·mainPC` y empezamos el thread actual.
+
+* Iniciando el programa
+
+`$mainPC` apunta a `runtime.main`.
+
+.link https://github.com/golang/go/blob/9462bcedc612eb8b735ad7f3417c88be37f387b4/src/runtime/main.go#L28 $GOROOT/src/runtime/main.go:28
+
+Esta hace más inicialización, y al final llama primero a `main_init` y luego a `main_main`.
+
+Estas se declaran como:
+
+	//go:linkname main_init main.init
+	func main_init()
+
+	//go:linkname main_main main.main
+	func main_main()
+
+Y, ahora sí, estas son el `init` y el `main` de nuestro programa que hemos estado examinando.
+
+* Concluyendo
+
+Ahora que Go está escrito en Go, estudiar cómo funciona es más fácil.
+
+Esta charla ha sido introductoria para posteriores charlas o artículos.
+
+Go es un lenguaje de relativo bajo nivel.
+
+No es difícil averiguar qué está haciendo en realidad, y planear en consecuencia.
